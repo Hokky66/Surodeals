@@ -78,7 +78,7 @@ export async function setupAuth(app: Express) {
   const oidcClient = new issuer.Client({
     client_id: process.env.REPL_ID!,
     client_secret: process.env.REPL_SECRET!,
-    redirect_uris: [`https://${process.env.REPLIT_DOMAINS!.split(",")[0]}/api/callback`],
+    redirect_uris: [`${process.env.APP_URL}/api/callback`],
     response_types: ["code"],
   });
 
