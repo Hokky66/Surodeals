@@ -1,0 +1,13 @@
+# Verberg gevoelige bestanden
+.env
+
+# Node dependencies
+node_modules/
+
+# TypeScript output
+dist/
+build/
+
+# OS / editor bestanden
+.DS_Store
+*.log
