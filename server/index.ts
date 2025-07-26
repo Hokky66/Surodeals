@@ -65,7 +65,7 @@ app.use(session({
 
 
 // Serve static files from client build
-app.use(express.static(path.join(process.cwd(), 'client/dist')));
+// app.use(express.static(path.join(process.cwd(), 'client/dist')));
 app.use('/uploads', express.static(path.join(process.cwd(), 'public/uploads')));
 app.use('/images', express.static(path.join(process.cwd(), 'public/images')));
 app.use('/demo-images', express.static(path.join(process.cwd(), 'public/demo-images')));
