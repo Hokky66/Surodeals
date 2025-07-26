@@ -5,25 +5,26 @@ import session from "express-session";
 import type { Express, Request, Response, NextFunction } from "express";
 import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
-import { storage } from "./storage"; // jouw db logic
+import { storage } from "./storage";
 
+// 🔐 Memoized discovery voor betere performance
 const memoizedIssuerDiscovery = memoize(async (issuerUrl: string) => {
   try {
     return await client.Issuer.discover(issuerUrl);
   } catch (err) {
     console.error("Issuer discovery failed, using fallback issuer config:", err);
 
-    // Fallback issuer config — pas URLs aan naar jouw setup
     return new client.Issuer({
       issuer: issuerUrl,
       authorization_endpoint: `${issuerUrl}/authorize`,
-      token_endpoint: `${issuerUrl}/token`,
+      token_endpoint: `${issuerUrl}/oauth/token`,
       userinfo_endpoint: `${issuerUrl}/userinfo`,
-      end_session_endpoint: `${issuerUrl}/logout`,
+      end_session_endpoint: `${issuerUrl}/v2/logout`,
     });
   }
 }, { maxAge: 60 * 60 * 1000, promise: true });
 
+// 🔒 Express session middleware met PostgreSQL opslag
 export function getSession() {
   const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
   const pgStore = connectPg(session);
@@ -33,6 +34,7 @@ export function getSession() {
     ttl: sessionTtl,
     tableName: "sessions",
   });
+
   return session({
     secret: process.env.SESSION_SECRET!,
     store: sessionStore,
@@ -46,10 +48,8 @@ export function getSession() {
   });
 }
 
-function updateUserSession(
-  user: any,
-  tokens: client.TokenSet
-) {
+// 🔄 Gebruiker opslaan & tokens in session stoppen
+function updateUserSession(user: any, tokens: client.TokenSet) {
   user.claims = tokens.claims();
   user.access_token = tokens.access_token;
   user.refresh_token = tokens.refresh_token;
@@ -58,26 +58,27 @@ function updateUserSession(
 
 async function upsertUser(claims: any) {
   await storage.upsertUser({
-    id: claims["sub"],
-    email: claims["email"],
-    firstName: claims["first_name"],
-    lastName: claims["last_name"],
-    profileImageUrl: claims["profile_image_url"],
+    id: claims.sub,
+    email: claims.email,
+    firstName: claims.given_name || claims.first_name || "",
+    lastName: claims.family_name || claims.last_name || "",
+    profileImageUrl: claims.picture || "",
   });
 }
 
+// 🔐 Setup auth met Auth0 via passport-openidconnect
 export async function setupAuth(app: Express) {
   app.set("trust proxy", 1);
   app.use(getSession());
   app.use(passport.initialize());
   app.use(passport.session());
 
-  const issuerUrl = process.env.ISSUER_URL!;
+  const issuerUrl = process.env.AUTH0_ISSUER_URL!;
   const issuer = await memoizedIssuerDiscovery(issuerUrl);
 
   const oidcClient = new issuer.Client({
-    client_id: process.env.REPL_ID!,
-    client_secret: process.env.REPL_SECRET!,
+    client_id: process.env.AUTH0_CLIENT_ID!,
+    client_secret: process.env.AUTH0_CLIENT_SECRET!,
     redirect_uris: [`${process.env.APP_URL}/api/callback`],
     response_types: ["code"],
   });
@@ -92,53 +93,47 @@ export async function setupAuth(app: Express) {
     verified(null, user);
   };
 
-  for (const domain of process.env.REPLIT_DOMAINS!.split(",")) {
-    const strategy = new Strategy(
-      {
-        issuer: issuer.issuer,
-        authorizationURL: issuer.metadata.authorization_endpoint,
-        tokenURL: issuer.metadata.token_endpoint,
-        userInfoURL: issuer.metadata.userinfo_endpoint,
-        clientID: process.env.REPL_ID!,
-        clientSecret: process.env.REPL_SECRET!,
-        callbackURL: `https://${domain}/api/callback`,
-        scope: "openid email profile offline_access",
-      },
-      verify
-    );
-    passport.use(`replitauth:${domain}`, strategy);
-  }
+  const strategy = new Strategy(
+    {
+      issuer: issuer.issuer,
+      authorizationURL: issuer.metadata.authorization_endpoint,
+      tokenURL: issuer.metadata.token_endpoint,
+      userInfoURL: issuer.metadata.userinfo_endpoint,
+      clientID: process.env.AUTH0_CLIENT_ID!,
+      clientSecret: process.env.AUTH0_CLIENT_SECRET!,
+      callbackURL: `${process.env.APP_URL}/api/callback`,
+      scope: "openid email profile offline_access",
+    },
+    verify
+  );
+
+  passport.use("auth0", strategy);
 
   passport.serializeUser((user: Express.User, cb) => cb(null, user));
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
-  app.get("/api/login", (req, res, next) => {
-    passport.authenticate(`replitauth:${req.hostname}`, {
-      prompt: "login consent",
-      scope: ["openid", "email", "profile", "offline_access"],
-    })(req, res, next);
-  });
+  // Login route
+  app.get("/api/login", passport.authenticate("auth0", {
+    prompt: "login consent",
+    scope: ["openid", "email", "profile", "offline_access"],
+  }));
 
-  app.get("/api/callback", (req, res, next) => {
-    passport.authenticate(`replitauth:${req.hostname}`, {
-      successReturnToOrRedirect: "/",
-      failureRedirect: "/api/login",
-    })(req, res, next);
-  });
+  // Callback route
+  app.get("/api/callback", passport.authenticate("auth0", {
+    successReturnToOrRedirect: "/",
+    failureRedirect: "/api/login",
+  }));
 
+  // Logout route
   app.get("/api/logout", (req, res) => {
     req.logout(() => {
-      res.redirect(
-        client.Issuer.Url.buildEndSessionUrl(issuer, {
-          client_id: process.env.REPL_ID!,
-          post_logout_redirect_uri: `${req.protocol}://${req.hostname}`,
-        }).href
-      );
+      const logoutUrl = `${issuer.metadata.end_session_endpoint}?client_id=${process.env.AUTH0_CLIENT_ID}&post_logout_redirect_uri=${process.env.APP_URL}`;
+      res.redirect(logoutUrl);
     });
   });
 }
 
-// Middleware om routes te beschermen
+// 🛡️ Middleware om routes te beveiligen
 export function isAuthenticated(req: Request, res: Response, next: NextFunction) {
   if (req.isAuthenticated && req.isAuthenticated()) {
     return next();
@@ -146,5 +141,6 @@ export function isAuthenticated(req: Request, res: Response, next: NextFunction)
     res.status(401).json({ error: "Niet ingelogd" });
   }
 }
+
 
 
