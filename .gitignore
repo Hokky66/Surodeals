@@ -5,7 +5,8 @@
 node_modules/
 
 # TypeScript output
-dist/
+dist/*
+!dist/public/
 build/
 
 # OS / editor bestanden
