@@ -9,10 +9,11 @@
     "dev": "npm run dev:server",
     "dev:client": "echo 'client disabled'",
     "dev:server": "cross-env NODE_ENV=development tsx server/index.ts",
-    "build": "npm run build:server",
+    "build": "node copy-public.cjs",
     "install:deps": "cd client && npm install",
     "build:client": "cd client && npm run build",
     "build:server": "esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist --external:pg-native",
+    "postinstall": "npm run build:server",
     "start": "node dist/index.js"
   },
   "dependencies": {
@@ -23,6 +24,8 @@
     "@stripe/stripe-js": "^7.4.0",
     "bcrypt": "^6.0.0",
     "connect-pg-simple": "^10.0.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
     "csurf": "^1.11.0",
     "date-fns": "^4.1.0",
     "dotenv": "^17.2.1",
@@ -65,6 +68,7 @@
     "@types/ws": "^8.5.13",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
+    "fs-extra": "^11.3.0",
     "typescript": "^5.7.2"
   }
 }
