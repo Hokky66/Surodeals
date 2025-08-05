@@ -67,23 +67,27 @@ const upload = multer({
 });
 
 export function setupRoutes(app: Express) {
-  // Demo login endpoint - simple token approach
+
+  // ✅ Debug route toevoegen
+  app.get('/api/categories', (req, res) => {
+    res.json({ test: 'categories route werkt!' });
+  });
+
+    // 🧪 Demo login endpoint
   app.get('/api/demo/login/:userId', async (req: Request, res: Response) => {
     try {
       const { userId } = req.params;
       console.log("Demo login attempt for:", userId);
       
       if (userId === 'ggriedewald') {
-        // Generate simple demo token
         const demoToken = Buffer.from(JSON.stringify({
           sub: '93ec4e88-a9dd-404d-aece-407b155ea0e3',
           email: 'ggriedewald@gmail.com',
           firstName: 'Gino',
           lastName: 'Riedewald',
-          exp: Date.now() + (7 * 24 * 60 * 60 * 1000) // 7 days
+          exp: Date.now() + (7 * 24 * 60 * 60 * 1000)
         })).toString('base64');
         
-        // Redirect with token in URL, frontend will store it
         res.redirect(`/profile?demoToken=${demoToken}`);
       } else {
         res.status(401).send('Invalid demo user');
@@ -93,7 +97,6 @@ export function setupRoutes(app: Express) {
       res.status(500).send('Demo login failed');
     }
   });
-
   // Auto-login route with token generation
   app.get('/api/auto-login', async (req: Request, res: Response) => {
     try {
@@ -132,6 +135,32 @@ export function setupRoutes(app: Express) {
     }
   });
 
+// Categories routes
+  app.get("/api/categories", async (req: Request, res: Response) => {
+    try {
+      const categories = await dbStorage.getCategories();
+      res.json(categories);
+    } catch (error) {
+      console.error("Error fetching categories:", error);
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+
+  app.post("/api/categories", async (req: Request, res: Response) => {
+    try {
+      const categoryData = insertCategorySchema.parse(req.body);
+      const category = await dbStorage.createCategory(categoryData);
+      res.json(category);
+    } catch (error) {
+      console.error("Error creating category:", error);
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Invalid data", errors: error.errors });
+      } else {
+        res.status(500).json({ message: "Server error" });
+      }
+    }
+  });
+  
   // Logout route
   app.post("/api/logout", (req, res) => {
     req.session.destroy(err => {
@@ -2366,4 +2395,6 @@ export function setupRoutes(app: Express) {
       res.status(500).json({ message: "Fout bij verwijderen concept" });
     }
   });
+
+  
 }
